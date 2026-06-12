@@ -1,6 +1,7 @@
 import {Localize} from '../../modules/Localize.mjs';
 import {EventEmitter} from '../../modules/eventemitter.mjs';
 import {WebVTT} from '../../modules/vtt.mjs';
+import {AlertPolyfill} from '../../utils/AlertPolyfill.mjs';
 import {WebUtils} from '../../utils/WebUtils.mjs';
 import {DOMElements} from '../DOMElements.mjs';
 
@@ -31,19 +32,109 @@ export class SubtitleSyncer extends EventEmitter {
     // track line is grabbable
     let isGrabbingTrack = false;
     let grabStartTrack = 0;
+    let grabbedCue = null;
+    let grabbedEdge = null;
+
 
     this.ui.timelineTrack.addEventListener('mousedown', (e) => {
       isGrabbingTrack = true;
       grabStartTrack = e.clientX;
+      if (window.subEditMode && !e.shiftKey) {
+        const grabbed = this.trackElements.find((el) => {
+          const rect = el.element.getBoundingClientRect();
+          return e.clientX >= rect.left && e.clientX <= rect.right;
+        }) || null;
+        // check if grabbing right edge to resize cue
+        if (grabbed) {
+          const rect = grabbed.element.getBoundingClientRect();
+          if (e.clientX >= rect.right - 5 && e.clientX <= rect.right + 5) {
+            grabbedEdge = 'right';
+          } else {
+            grabbedEdge = null;
+          }
+
+          grabbedCue = grabbed.cue;
+        } else {
+          grabbedCue = null;
+        }
+      } else {
+        grabbedCue = null;
+        grabbedEdge = null;
+      }
     });
 
-    DOMElements.playerContainer.addEventListener('mouseup', () => {
-      isGrabbingTrack = false;
+    // double click to edit
+    this.ui.timelineTrack.addEventListener('dblclick', (e) => {
+      if (!window.subEditMode) return;
+      const time = this.client.interfaceController.fineTimeControls.mousePositionToTime(e.clientX);
+      const cue = this.trackToSync.cues.find((c) => {
+        return time >= c.startTime && time <= c.endTime;
+      });
+      if (cue) {
+        AlertPolyfill.prompt('Edit subtitle text', cue.text).then((newText) => {
+          if (newText) {
+            cue.text = newText;
+            cue.dom2 = null; // reset cached DOM tree so it will be regenerated with new text
+            cue.dom = null; // reset cached DOM tree so it will be regenerated with new text
+            // update element
+            const el = this.trackElements.find((el) => el.cue === cue);
+            if (el) {
+              el.element.replaceChildren();
+              if (!cue.dom2) {
+                cue.dom2 = WebVTT.convertCueToDOMTree(window, cue.text);
+              }
+              el.element.appendChild(cue.dom2);
+              el.element.title = cue.text;
+            }
+          } else {
+            // if text is empty, remove cue
+            const index = this.trackToSync.cues.indexOf(cue);
+            if (index !== -1) {
+              this.trackToSync.cues.splice(index, 1);
+            }
+          }
+        });
+      } else {
+        // create new cue at this time with default duration of 2 seconds
+        const newCue = new VTTCue(time, time + 2, 'New subtitle');
+        this.trackToSync.cues.push(newCue);
+        // sort cues by start time
+        this.trackToSync.cues.sort((a, b) => a.startTime - b.startTime);
+        this.client.interfaceController.subtitlesManager.renderSubtitles();
+        AlertPolyfill.prompt('Edit subtitle text', newCue.text).then((newText) => {
+          if (newText) {
+            newCue.text = newText;
+            newCue.dom2 = null; // reset cached DOM tree so it will be regenerated with new text
+            newCue.dom = null; // reset cached DOM tree so it will be regenerated with new text
+            const el = this.trackElements.find((el) => el.cue === newCue);
+            if (el) {
+              el.element.replaceChildren();
+              if (!newCue.dom2) {
+                newCue.dom2 = WebVTT.convertCueToDOMTree(window, newCue.text);
+              }
+              el.element.appendChild(newCue.dom2);
+              el.element.title = newCue.text;
+            }
+            this.client.interfaceController.subtitlesManager.renderSubtitles();
+          }
+        });
+      }
     });
 
-    DOMElements.playerContainer.addEventListener('mouseleave', () => {
+    const clearGrabbing = () => {
+      // if cue was grabbed then resort
+      if (grabbedCue) {
+        this.trackToSync.cues.sort((a, b) => a.startTime - b.startTime);
+      }
+
       isGrabbingTrack = false;
-    });
+      grabbedCue = null;
+      grabbedEdge = null;
+    };
+
+    DOMElements.playerContainer.addEventListener('mouseup', clearGrabbing);
+
+    DOMElements.playerContainer.addEventListener('mouseleave', clearGrabbing);
 
     DOMElements.playerContainer.addEventListener('mousemove', (e) => {
       if (!this.client.player) return;
@@ -51,7 +142,22 @@ export class SubtitleSyncer extends EventEmitter {
       if (isGrabbingTrack) {
         const delta = e.clientX - grabStartTrack;
         grabStartTrack = e.clientX;
-        this.trackToSync.shift(delta / this.ui.timelineTrack.clientWidth * video.duration);
+        const amount = delta / this.ui.timelineTrack.clientWidth * video.duration;
+        if (grabbedCue) {
+          if (grabbedEdge === 'right') {
+            grabbedCue.endTime += amount;
+            // update element
+            const el = this.trackElements.find((el) => el.cue === grabbedCue);
+            if (el) {
+              el.element.style.width = (grabbedCue.endTime - grabbedCue.startTime) / video.duration * 100 + '%';
+            }
+          } else {
+            this.trackToSync.shiftAfter(grabbedCue, amount);
+          }
+        } else {
+          if (window.subEditMode) return;
+          this.trackToSync.shift(amount);
+        }
         this.client.interfaceController.subtitlesManager.renderSubtitles();
       }
     });
