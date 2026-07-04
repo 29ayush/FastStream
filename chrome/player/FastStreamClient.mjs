@@ -91,6 +91,9 @@ export class FastStreamClient extends EventEmitter {
       maximumDownloaders: 6,
       maxPlaybackRate: EnvUtils.isChrome() ? 16 : 8,
       youtubePlayerID: '',
+      subtitleSearchProvider: 'opensubtitles',
+      subsWyzieApiKey: '',
+      subsWyzieRecentImdbIds: [],
     };
     this.state = {
       playing: false,
@@ -319,6 +322,9 @@ export class FastStreamClient extends EventEmitter {
     // this.options.defaultYoutubeClient = options.defaultYoutubeClient;
     this.options.youtubePlayerID = options.youtubePlayerID;
     this.options.maximumDownloaders = options.maximumDownloaders;
+    this.options.subtitleSearchProvider = options.subtitleSearchProvider || 'opensubtitles';
+    this.options.subsWyzieApiKey = options.subsWyzieApiKey || '';
+    this.options.subsWyzieRecentImdbIds = Array.isArray(options.subsWyzieRecentImdbIds) ? options.subsWyzieRecentImdbIds : [];
 
     if (sessionStorage && sessionStorage.getItem('autoplayNext') !== null) {
       this.options.autoplayNext = sessionStorage.getItem('autoplayNext') == 'true';
@@ -2022,4 +2028,3 @@ export class FastStreamClient extends EventEmitter {
     this.player.getVideo().style.objectFit = 'cover';
   }
 }
-

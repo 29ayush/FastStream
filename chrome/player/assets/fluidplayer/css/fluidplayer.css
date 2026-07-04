@@ -1374,10 +1374,69 @@ body {
     border: 1px solid var(--popwindow-textinput-focus-border-color);
 }
 
+.subtitle-search-container {
+    display: block;
+}
+
+.subtitle-opensubtitles-container,
+.subtitle-wyzie-container {
+    margin-top: 16px;
+}
+
+.subtitle-wyzie-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 560px;
+}
+
+.subtitle-wyzie-heading-row {
+    display: grid;
+    column-gap: 8px;
+    align-items: center;
+    color: var(--popwindow-button-titletext-color);
+    font-size: 13px;
+    line-height: 18px;
+}
+
+.subtitle-wyzie-values-row {
+    display: grid;
+    column-gap: 8px;
+    align-items: center;
+}
+
+.subtitle-wyzie-imdb-heading-row {
+    grid-template-columns: 1fr;
+}
+
+.subtitle-wyzie-imdb-values-row {
+    grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+}
+
+.subtitle-wyzie-episode-heading-row,
+.subtitle-wyzie-episode-values-row {
+    grid-template-columns: repeat(3, minmax(62px, 90px));
+}
+
+.subtitle-wyzie-source-status {
+    color: var(--popwindow-button-titletext-color);
+    font-size: 13px;
+    min-height: 18px;
+}
+
+.subtitle-wyzie-search-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+}
+
 .subtitle-episode-input,
 .subtitle-season-input,
 .subtitle-language-input,
 .subtitle-year-input,
+.subtitle-wyzie-season-input,
+.subtitle-wyzie-episode-input,
+.subtitle-wyzie-language-input,
 .subtitle-search-input {
     margin-right: 4px;
     width: 70px;
@@ -1391,6 +1450,151 @@ body {
     width: calc(100% - 100px);
     margin-bottom: 5px;
     text-align: left;
+}
+
+.subtitle-provider-selector,
+.subtitle-wyzie-imdb-picker,
+.subtitle-wyzie-imdb-input,
+.subtitle-wyzie-label-input,
+.subtitle-wyzie-season-input,
+.subtitle-wyzie-episode-input,
+.subtitle-wyzie-language-input {
+    margin: 0;
+}
+
+.subtitle-provider-selector {
+    display: block;
+    width: max-content;
+    min-width: 140px;
+}
+
+.subtitle-wyzie-imdb-picker {
+    position: relative;
+    user-select: none;
+    cursor: pointer;
+    color: var(--popwindow-button-titletext-color);
+    background-color: var(--popwindow-button-background-color);
+    border-radius: 2px;
+    width: 100%;
+    min-height: 31px;
+    box-sizing: border-box;
+    padding: 3px 8px;
+}
+
+.subtitle-wyzie-imdb-picker[data-mode="recent"] {
+    grid-column: 1 / -1;
+}
+
+.subtitle-wyzie-imdb-picker-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 25px;
+}
+
+.subtitle-wyzie-imdb-picker-text,
+.subtitle-wyzie-imdb-picker-item-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subtitle-wyzie-imdb-picker-arrow {
+    flex: 0 0 auto;
+    color: var(--popwindow-button-text-color);
+}
+
+.subtitle-wyzie-imdb-picker-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    display: none;
+    min-width: 260px;
+    max-width: 420px;
+    max-height: calc(80vh - 50px);
+    overflow-y: auto;
+    z-index: 1000;
+    background-color: var(--popwindow-dropdown-item-background-color);
+}
+
+.subtitle-wyzie-imdb-picker[data-mode="recent"] .subtitle-wyzie-imdb-picker-menu {
+    width: 100%;
+    max-width: none;
+}
+
+.subtitle-wyzie-imdb-picker:hover .subtitle-wyzie-imdb-picker-menu,
+.subtitle-wyzie-imdb-picker:focus .subtitle-wyzie-imdb-picker-menu,
+.subtitle-wyzie-imdb-picker:focus-within .subtitle-wyzie-imdb-picker-menu {
+    display: block;
+}
+
+.subtitle-wyzie-imdb-picker-item,
+.subtitle-wyzie-imdb-picker-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 26px;
+    padding: 4px 7px;
+    color: var(--popwindow-button-text-color);
+    background-color: var(--popwindow-dropdown-item-background-color);
+}
+
+.subtitle-wyzie-imdb-picker-item:hover {
+    background-color: var(--popwindow-dropdown-item-hover-background-color);
+}
+
+.subtitle-wyzie-imdb-picker-item.is-selected {
+    background-color: var(--popwindow-dropdown-item-selected-background-color);
+}
+
+.subtitle-wyzie-imdb-picker-empty {
+    cursor: default;
+    color: var(--popwindow-button-titletext-color);
+}
+
+.subtitle-wyzie-imdb-picker-delete {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    cursor: pointer;
+    color: var(--popwindow-button-text-color);
+    background-color: transparent;
+    font: inherit;
+    line-height: 20px;
+}
+
+.subtitle-wyzie-imdb-picker-delete:hover {
+    background-color: var(--popwindow-button-hover-background-color);
+}
+
+.subtitle-wyzie-custom-fields {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(90px, 1fr);
+    column-gap: 8px;
+}
+
+.subtitle-wyzie-imdb-input,
+.subtitle-wyzie-label-input,
+.subtitle-wyzie-season-input,
+.subtitle-wyzie-episode-input,
+.subtitle-wyzie-language-input {
+    width: 100%;
+    height: 25px;
+    box-sizing: border-box;
+}
+
+@media (max-width: 520px) {
+    .subtitle-wyzie-imdb-values-row {
+        grid-template-columns: 1fr;
+        row-gap: 7px;
+    }
 }
 
 .textbutton {

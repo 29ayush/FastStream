@@ -28,7 +28,7 @@ export class SubtitlesManager extends EventEmitter {
     this.settingsManager.on(SubtitlesSettingsManagerEvents.SETTINGS_CHANGED, this.onSettingsChanged.bind(this));
     this.settingsManager.loadSettings();
 
-    this.openSubtitlesSearch = new OpenSubtitlesSearch(client.version);
+    this.openSubtitlesSearch = new OpenSubtitlesSearch(client);
     this.openSubtitlesSearch.on(OpenSubtitlesSearchEvents.TRACK_DOWNLOADED, this.onSubtitleTrackDownloaded.bind(this));
 
     this.subtitleSyncer = new SubtitleSyncer(client);
