@@ -22,6 +22,7 @@
   };
 
   const iframeMap = new Map();
+  const overlayBlockerState = new Map();
   const replacedPlayerQueue = [];
   const elementsChangedByFillscreen = [];
   const linkRequests = new Map();
@@ -150,6 +151,7 @@
       iframeMap.set(request.frameId, newFrameObj);
 
       updateReplacedPlayers();
+      queueInitialOverlayBlocker(newFrameObj);
     }
   });
 
@@ -419,6 +421,427 @@
     }
   }
 
+  function queueInitialOverlayBlocker(iframeObj) {
+    [0, 250, 750, 1500, 3000].forEach((delay) => {
+      setTimeout(() => {
+        if (iframeMap.get(iframeObj.frameId) !== iframeObj) {
+          return;
+        }
+
+        setOverlayBlocker(iframeObj.frameId);
+      }, delay);
+    });
+  }
+
+  function setOverlayBlocker(frameId) {
+    const iframeObj = iframeMap.get(frameId);
+    if (!iframeObj) {
+      return {
+        enabled: false,
+        error: 'no_element',
+        hiddenCount: 0,
+      };
+    }
+
+    let state = overlayBlockerState.get(frameId);
+    if (!state) {
+      state = {
+        frameId,
+        iframeObj,
+        hidden: new Map(),
+        observer: null,
+        scanTimeout: null,
+        enabled: true,
+      };
+      overlayBlockerState.set(frameId, state);
+    }
+
+    state.iframeObj = iframeObj;
+    state.enabled = true;
+    scanOverlayBlocker(state);
+
+    if (!state.observer && document.documentElement) {
+      state.observer = new MutationObserver(() => {
+        queueOverlayBlockerScan(state);
+      });
+      state.observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden'],
+      });
+    }
+
+    return {
+      enabled: true,
+      hiddenCount: state.hidden.size,
+    };
+  }
+
+  function queueOverlayBlockerScan(state) {
+    clearTimeout(state.scanTimeout);
+    state.scanTimeout = setTimeout(() => {
+      scanOverlayBlocker(state);
+    }, 80);
+  }
+
+  function scanOverlayBlocker(state) {
+    if (!state.enabled) {
+      return 0;
+    }
+
+    const iframe = state.iframeObj?.iframe;
+    if (!iframe || !iframe.isConnected) {
+      restoreOverlayBlocker(state.frameId);
+      return 0;
+    }
+
+    let hiddenCount = 0;
+    for (let i = 0; i < 5; i++) {
+      const blockers = detectAllOverlayBlockers(state.iframeObj)
+          .filter((element) => !state.hidden.has(element));
+      if (blockers.length === 0) {
+        break;
+      }
+
+      blockers.forEach((element) => {
+        hideOverlayElement(state, element);
+      });
+      hiddenCount += blockers.length;
+    }
+
+    return hiddenCount;
+  }
+
+  function hideOverlayElement(state, element) {
+    if (state.hidden.has(element)) {
+      return;
+    }
+
+    state.hidden.set(element, element.getAttribute('style'));
+    element.style.setProperty('display', 'none', 'important');
+  }
+
+  function restoreOverlayBlocker(frameId) {
+    const state = overlayBlockerState.get(frameId);
+    if (!state) {
+      return;
+    }
+
+    state.enabled = false;
+    clearTimeout(state.scanTimeout);
+    if (state.observer) {
+      state.observer.disconnect();
+      state.observer = null;
+    }
+
+    state.hidden.forEach((oldStyle, element) => {
+      if (oldStyle === null) {
+        element.removeAttribute('style');
+      } else {
+        element.setAttribute('style', oldStyle);
+      }
+    });
+
+    overlayBlockerState.delete(frameId);
+  }
+
+  function restoreAllOverlayBlockers() {
+    Array.from(overlayBlockerState.keys()).forEach((frameId) => {
+      restoreOverlayBlocker(frameId);
+    });
+  }
+
+  function detectAllOverlayBlockers(iframeObj) {
+    return removeNestedOverlayCandidates(Array.from(new Set([
+      ...detectOverlayBlockers(iframeObj.iframe),
+      ...detectReplacedPlayerOverlays(iframeObj),
+    ])));
+  }
+
+  function detectOverlayBlockers(targetElement) {
+    const targetRect = targetElement.getBoundingClientRect();
+    if (!hasRectArea(targetRect)) {
+      return [];
+    }
+
+    const trace = traceParents(targetElement);
+    const targetArea = targetRect.width * targetRect.height;
+    const candidates = new Set();
+    const points = getOverlaySamplePoints(targetRect);
+
+    points.forEach(([x, y]) => {
+      const stack = document.elementsFromPoint(x, y);
+      const targetIndex = stack.indexOf(targetElement);
+      if (targetIndex === 0) {
+        return;
+      }
+
+      const limit = targetIndex === -1 ? stack.length : targetIndex;
+      for (let i = 0; i < limit; i++) {
+        const candidate = normalizeOverlayCandidate(stack[i], targetElement, targetRect, trace, targetArea);
+        if (candidate) {
+          candidates.add(candidate);
+        }
+      }
+    });
+
+    return removeNestedOverlayCandidates(Array.from(candidates));
+  }
+
+  function detectReplacedPlayerOverlays(iframeObj) {
+    const iframe = iframeObj?.iframe;
+    const oldPlayer = iframeObj?.replacedData?.old;
+    if (!iframe || !oldPlayer) {
+      return [];
+    }
+
+    const targetRect = iframe.getBoundingClientRect();
+    if (!hasRectArea(targetRect)) {
+      return [];
+    }
+
+    const targetArea = targetRect.width * targetRect.height;
+    const candidates = new Set();
+    const containers = getNearbyOriginalPlayerContainers(iframe, oldPlayer, targetRect, targetArea);
+
+    containers.forEach((container) => {
+      const elements = [container, ...querySelectorAllIncludingShadows('*', container)];
+      elements.forEach((element) => {
+        if (isOriginalPlayerOverlayCandidate(element, iframe, targetRect, targetArea)) {
+          candidates.add(element);
+        }
+      });
+    });
+
+    return removeNestedOverlayCandidates(Array.from(candidates));
+  }
+
+  function getNearbyOriginalPlayerContainers(iframe, oldPlayer, targetRect, targetArea) {
+    const containers = new Set();
+    [oldPlayer.parentElement, iframe.parentElement].forEach((element) => {
+      if (element) {
+        containers.add(element);
+      }
+    });
+
+    let current = oldPlayer;
+    for (let i = 0; i < 4 && current; i++) {
+      current = getParentElement(current);
+      if (!current || current === document.body || current === document.documentElement) {
+        break;
+      }
+
+      const rect = current.getBoundingClientRect();
+      if (getRectIntersectionArea(rect, targetRect) >= Math.min(targetArea * 0.25, 50000)) {
+        containers.add(current);
+      }
+    }
+
+    return Array.from(containers);
+  }
+
+  function getOverlaySamplePoints(rect) {
+    const left = Math.max(0, rect.left);
+    const right = Math.min(window.innerWidth - 1, rect.right);
+    const top = Math.max(0, rect.top);
+    const bottom = Math.min(window.innerHeight - 1, rect.bottom);
+
+    if (right <= left || bottom <= top) {
+      return [];
+    }
+
+    const fractions = [
+      [0.5, 0.5],
+      [0.15, 0.15],
+      [0.85, 0.15],
+      [0.15, 0.85],
+      [0.85, 0.85],
+      [0.5, 0.15],
+      [0.5, 0.85],
+      [0.15, 0.5],
+      [0.85, 0.5],
+    ];
+
+    return fractions.map(([x, y]) => [
+      left + ((right - left) * x),
+      top + ((bottom - top) * y),
+    ]);
+  }
+
+  function normalizeOverlayCandidate(element, targetElement, targetRect, trace, targetArea) {
+    let current = element;
+    let best = null;
+
+    while (current && current !== document.documentElement && current !== document.body) {
+      if (current === targetElement || trace.includes(current) || current.contains(targetElement)) {
+        break;
+      }
+
+      if (isOverlayBlockerCandidate(current, targetRect, targetArea)) {
+        best = current;
+      }
+
+      current = getParentElement(current);
+    }
+
+    return best;
+  }
+
+  function isOverlayBlockerCandidate(element, targetRect, targetArea) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    if (
+      element.tagName === 'HTML' ||
+      element.tagName === 'BODY' ||
+      element.tagName === 'HEAD'
+    ) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse' ||
+      style.pointerEvents === 'none'
+    ) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (!hasRectArea(rect)) {
+      return false;
+    }
+
+    const overlap = getRectIntersectionArea(rect, targetRect);
+    if (overlap <= 0) {
+      return false;
+    }
+
+    const overlapRatio = overlap / targetArea;
+    const likelyOverlay = isLikelyOverlayElement(element) || isInteractiveElement(element);
+    const positionedLayer = isPositionedOverlayLayer(style);
+
+    if (!likelyOverlay && !positionedLayer) {
+      return false;
+    }
+
+    if (likelyOverlay && overlapRatio >= 0.2) {
+      return true;
+    }
+
+    return positionedLayer &&
+      overlap >= Math.min(Math.max(targetArea * 0.05, 2000), 20000);
+  }
+
+  function isOriginalPlayerOverlayCandidate(element, targetElement, targetRect, targetArea) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    if (
+      element === targetElement ||
+      element.contains(targetElement) ||
+      targetElement.contains(element) ||
+      element.tagName === 'HTML' ||
+      element.tagName === 'BODY' ||
+      element.tagName === 'HEAD'
+    ) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse'
+    ) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (!hasRectArea(rect)) {
+      return false;
+    }
+
+    const overlap = getRectIntersectionArea(rect, targetRect);
+    if (overlap <= 0) {
+      return false;
+    }
+
+    const overlapThreshold = Math.min(Math.max(targetArea * 0.01, 400), 5000);
+    const overlapRatio = overlap / targetArea;
+    const likelyOverlay = isLikelyOverlayElement(element) || isInteractiveElement(element);
+    const positionedLayer = isPositionedOverlayLayer(style);
+
+    if (likelyOverlay && overlapRatio >= 0.2) {
+      return true;
+    }
+
+    return overlap >= overlapThreshold &&
+      likelyOverlay &&
+      (positionedLayer || isLikelyOverlayElement(element));
+  }
+
+  function isPositionedOverlayLayer(style) {
+    if (style.position === 'fixed' || style.position === 'absolute' || style.position === 'sticky') {
+      return true;
+    }
+
+    const zIndex = parseInt(style.zIndex, 10);
+    return Number.isFinite(zIndex) && zIndex > 0;
+  }
+
+  function isLikelyOverlayElement(element) {
+    return /overlay|play-ui|player-ui|control|button|play|pause|poster|mask|cover|click/i.test(getElementSignature(element));
+  }
+
+  function isInteractiveElement(element) {
+    if (element.tabIndex >= 0 || typeof element.onclick === 'function') {
+      return true;
+    }
+
+    const role = element.getAttribute('role');
+    if (role === 'button' || role === 'link') {
+      return true;
+    }
+
+    return /^(A|BUTTON|INPUT|SELECT|TEXTAREA|VIDEO|AUDIO)$/.test(element.tagName);
+  }
+
+  function getElementSignature(element) {
+    const className = typeof element.className === 'string' ? element.className : element.getAttribute('class') || '';
+    return `${element.id || ''} ${className} ${element.getAttribute('role') || ''}`;
+  }
+
+  function removeNestedOverlayCandidates(candidates) {
+    return candidates.filter((candidate) => {
+      return !candidates.some((other) => {
+        return other !== candidate && other.contains(candidate);
+      });
+    });
+  }
+
+  function hasRectArea(rect) {
+    return rect.width > 1 && rect.height > 1;
+  }
+
+  function getRectIntersectionArea(a, b) {
+    const left = Math.max(a.left, b.left);
+    const right = Math.min(a.right, b.right);
+    const top = Math.max(a.top, b.top);
+    const bottom = Math.min(a.bottom, b.bottom);
+
+    if (right <= left || bottom <= top) {
+      return 0;
+    }
+
+    return (right - left) * (bottom - top);
+  }
+
   async function sendToPlayer(frameId, data) {
     const frameIds = [];
     if (typeof frameId === 'number') {
@@ -508,6 +931,7 @@
   }
 
   function removePlayers() {
+    restoreAllOverlayBlockers();
     MiniplayerCooldown = Date.now() + 1000;
     iframeMap.forEach((iframeObj) => {
       unmakeMiniPlayer(iframeObj);
@@ -799,12 +1223,17 @@
       player.dataset.oldContain = player.style.contain;
     }
 
+    if (player.style.pointerEvents) {
+      player.dataset.oldPointerEvents = player.style.pointerEvents;
+    }
+
     player.style.setProperty('width', '0px', 'important');
     player.style.setProperty('height', '0px', 'important');
     player.style.setProperty('overflow', 'hidden', 'important');
     player.style.setProperty('margin', '0px', 'important');
     player.style.setProperty('transition', 'none', 'important');
     player.style.setProperty('contain', 'paint', 'important');
+    player.style.setProperty('pointer-events', 'none', 'important');
   }
 
   function showSoft(player) {
@@ -823,6 +1252,9 @@
     }
     if (player.style.contain === 'paint') {
       player.style.contain = player.dataset.oldContain || '';
+    }
+    if (player.style.pointerEvents === 'none') {
+      player.style.pointerEvents = player.dataset.oldPointerEvents || '';
     }
   }
 
